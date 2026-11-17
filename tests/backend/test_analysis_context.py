@@ -109,3 +109,17 @@ class CompactionPipelineTests(unittest.TestCase):
         self.assertEqual(table['series'][-1][table['columns'].index('maximum')],9999)
         self.assertEqual(table['compaction']['omitted_series_count'],0)
         self.assertIn('do not establish health',table['compaction']['limitation'])
+
+    def test_sensitive_label_keys_keep_keyed_structure_for_payload_redaction(self):
+        data=context(); rows=data['evidence']['queries'][0]['result']['series']
+        for row in rows: row['labels']['password']='not-a-real-secret-fixture'
+        out=compact_analysis_context(data)
+        self.assertEqual(out,data)
+        body=Model(Mock(),'unused').payload('fixture',out,__import__('core').REPORT_SCHEMA)
+        self.assertNotIn('not-a-real-secret-fixture',__import__('json').dumps(body))
+
+    def test_long_table_identity_is_not_silently_excerpted(self):
+        data=context(); rows=data['evidence']['queries'][0]['result']['series']
+        for row in rows: row['labels']['id']='stable-'+('x'*900)
+        compacted=compact_analysis_context(data)
+        self.assertEqual(Model.bounded_context(compacted,300)['evidence']['queries'][0]['result'],compacted['evidence']['queries'][0]['result'])

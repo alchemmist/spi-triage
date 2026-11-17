@@ -274,6 +274,10 @@ class Model:
                    'unreviewed','unreviewed_bytes','original_bytes','original_digest','limitation','limitations'}
         def visit(v,key=''):
             if key in protected:return v
+            # Structural compaction already bounded repetitions. Never excerpt
+            # table cell identities or corrupt label dictionary decoding. Final
+            # payload.redact still visits all cells for value sanitization.
+            if isinstance(v,dict) and v.get('format')=='observed_metric_table_v1':return v
             if isinstance(v,dict):return {k:visit(x,k) for k,x in v.items()}
             if isinstance(v,list):return [visit(x,key) for x in v]
             if isinstance(v,str) and len(v.encode('utf-8'))>limit:

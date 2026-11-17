@@ -1,5 +1,5 @@
 """Model-only metric projection; immutable collection/artifact data is untouched."""
-from core import digest
+from core import digest, SECRET_KEY
 
 METRIC_SOURCES = frozenset(('prometheus_metrics', 'loki_error_frequency',
                             'host_log_error_frequency', 'loki_rule_metric'))
@@ -66,6 +66,7 @@ def compact_metric_table(result, dictionary=False):
         return result
     if any(not isinstance(r, dict) or 'labels' not in r or set(r) - allowed or
            not isinstance(r['labels'], dict) or
+           any(SECRET_KEY.search(k) for k in r['labels']) or
            any(not isinstance(v, str) for v in r['labels'].values()) for r in rows):
         return result
     fields = set(rows[0])
