@@ -1,5 +1,6 @@
 """Bounded HTTP adapters; tokens are never returned to n8n or the model."""
 from __future__ import annotations
+from analysis_context import project_metric_series
 import json
 import logging
 import base64
@@ -517,6 +518,12 @@ class Model:
         for limit in (1200,600,300):
             if self.budget_reservation(self.payload(task,data,REPORT_SCHEMA))<=30000:break
             data=self.bounded_context(original,limit)
+        # Numeric/label cardinality is not reduced by scalar excerpts. Only
+        # model input may select an explicit metric-series prefix; complete
+        # evidence and artifact/candidate identities remain unchanged.
+        for series_limit in (16,8,4,2,1):
+            if self.budget_reservation(self.payload(task,data,REPORT_SCHEMA))<=30000:break
+            data=self.bounded_context(project_metric_series(original,series_limit),300)
         if self.budget_reservation(self.payload(task,data,REPORT_SCHEMA))>30000:
             raise Failure('LLM_CONTEXT_METADATA_TOO_LARGE')
         report=self.call(task,data,REPORT_SCHEMA,min(time.monotonic()+1800,getattr(REQUEST_DEADLINE,'at',float('inf'))))
