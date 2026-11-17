@@ -1,6 +1,6 @@
 """Bounded HTTP adapters; tokens are never returned to n8n or the model."""
 from __future__ import annotations
-from analysis_context import project_metric_series
+from analysis_context import project_metric_series, compact_analysis_context
 import json
 import logging
 import base64
@@ -510,20 +510,29 @@ class Model:
         ids=self.analysis_reference_ids(original)
         if ids is not None:
             task+=' Allowed artifact IDs: '+(', '.join(ids) if ids else '(none)')+'. Cite them in square brackets. If no supplied artifact supports a verified fact, return facts=[] and describe uncertainty under hypotheses/missing_evidence instead. Never turn an unsupported claim into a verified fact.'
-        # Prefer full context. Compact preliminary FULL report bodies before
-        # diagnostic evidence, then progressively bounded, explicit excerpts.
-        data=original
+        # Explicit pipeline: raw samples -> observed extrema/trend above ->
+        # lossless cross-series/table compaction -> bounded prose -> token fit.
+        # This stage ALWAYS runs before model admission, not only after overflow.
+        task+=' Metric table decoding: columns name each cell; the labels cell follows label_columns (null means absent), merged with common_labels. If label_values is present, non-null label cells are indices into that dictionary. For first/last in shared_times, cells contain values at that shared timestamp. Compaction retains every collected summary row; upstream limits still apply.'
+        compacted=compact_analysis_context(original)
+        data=self.bounded_context(compacted,600)
+        # Byte reduction is not necessarily token reduction. Choose using the
+        # SAME deployed complete-request counter, without transport/model calls.
+        coded=compact_analysis_context(original,dictionary=True)
+        alternative=self.bounded_context(coded,600)
+        if self.budget_reservation(self.payload(task,alternative,REPORT_SCHEMA)) < self.budget_reservation(self.payload(task,data,REPORT_SCHEMA)):
+            compacted=coded;data=alternative
         if self.budget_reservation(self.payload(task,data,REPORT_SCHEMA))>30000:
-            data={**original,'preliminary_match':self.bounded_context(match,600)}
+            data={**data,'preliminary_match':self.bounded_context(match,300)}
         for limit in (1200,600,300):
             if self.budget_reservation(self.payload(task,data,REPORT_SCHEMA))<=30000:break
-            data=self.bounded_context(original,limit)
+            data=self.bounded_context(compacted,limit)
         # Numeric/label cardinality is not reduced by scalar excerpts. Only
         # model input may select an explicit metric-series prefix; complete
         # evidence and artifact/candidate identities remain unchanged.
         for series_limit in (16,8,4,2,1):
             if self.budget_reservation(self.payload(task,data,REPORT_SCHEMA))<=30000:break
-            data=self.bounded_context(project_metric_series(original,series_limit),300)
+            data=self.bounded_context(compact_analysis_context(project_metric_series(original,series_limit)),300)
         if self.budget_reservation(self.payload(task,data,REPORT_SCHEMA))>30000:
             raise Failure('LLM_CONTEXT_METADATA_TOO_LARGE')
         report=self.call(task,data,REPORT_SCHEMA,min(time.monotonic()+1800,getattr(REQUEST_DEADLINE,'at',float('inf'))))

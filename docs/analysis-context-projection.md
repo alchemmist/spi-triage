@@ -40,3 +40,31 @@ deploy_target=spi-triage and freshassertednatural globalnativepending[] plus
 logicalowner/processing/paid0. Do not interrupt Calendar/Wait/alerts, replay the
 failedjob or paidprobe for acceptance. Runtimehashes/Argo are not model/report/
 Telegramnaturalacceptance; inspect nextnaturalscheduledoriginaljob separately.
+
+##17Nov owner follow-up: compaction is a pipeline, not last-minute truncation
+
+ALWAYS before final analysis: (1) raw range samples -> observed first/last,
+minimum/maximum/finite/nonzero counts; (2) lossless cross-series compaction of
+known metric summaries: commonlabels, label-key table, sharedtimestamps, optional
+labelvaluedictionary; (3) bounded600byte prose excerpts with explicit omitted
+byte counts/digest; (4) complete-request token measurement, then existing bounded
+fit fallback. Dictionary-coded vs plain tables chosen by the actual deployed
+request counter, NOT character/byte estimates. No extra paid summarization call.
+
+Every one of the collected100rows survives stage2 (including a peak at row100).
+No metric-unit mixing, synthetic sums, averaging across hosts, confidence score
+or semantic relevance ranking. Null labels distinguish missing from emptystring.
+Unknown source/result/row/pointfields remain unchanged rather than silently drop.
+Full originalsnapshot/artifactindex/querymetadata/collectionlimits are retained;
+summarydigest covers original observed summaryrows, NOT uncollected upstreamdata.
+The finalmodel receives table decoding rules and explicitcoverage/limitations.
+The16/8/4/2/1prefix escape hatch remains ONLY after losslesscompaction/tokenfit
+fail; its omissions must remain visible, never described as wholequeryreview.
+
+Actual retained75e8…offlineproof on deployedtokenizer: lossless100/100rows fits
+original30000 cap (about25.6K reservation versus39.6K oldminimal). Same10artifact
+IDs/candidate174, originalinputsdeep-equal, model/networkcalls0. This is lossless
+structural compaction on top of observedstatistical summaries, NOT a claim that
+an LLM semantically summarized all logs/traces/code or that originalqueries
+collected completeglobal evidence. No new nativeworkflowstageIDs, jobstate/schema
+migration, quota/attempt/deadlinereset or historicalcheckpointoverwrite.
