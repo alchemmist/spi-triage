@@ -49,6 +49,18 @@ class DeliveryIntegrationTests(unittest.TestCase):
         delivery.request=Mock(return_value=(200,{'cards':[{'key':key,'episode':episode,'immutable_key':True,'copies':[{'chat_id':1,'message_id':3,'text_stored':True}]}]}))
         delivery.discover()
         with self.store.db()as c:self.assertTrue(c.execute('SELECT receipt FROM spi_card_receipts WHERE episode=?',(episode,)).fetchone())
+    def test_discovery_repairs_existing_empty_receipt(self):
+        delivery=Delivery(self.store,'test',enabled=True);e=fixture.event();episode=e['episode']
+        receipt={'key':'Test/spi/'+episode,'episode':episode,'immutable_key':True,'copies':[]}
+        delivery.receipt(e,receipt)
+        delivery.links.record_primary_publication(e['event_key'],episode,1,{'kind':'issue','role':'primary','issue_number':7,'id':70,'html_url':'https://github.com/alchemmist/homelab/issues/7'})
+        copies=[{'chat_id':1,'message_id':3}]
+        delivery.request=Mock(return_value=(200,{'cards':[{**receipt,'copies':copies}]}))
+        self.assertTrue(delivery.discover())
+        with self.store.db() as c:
+            stored=c.execute('SELECT receipt FROM spi_card_receipts WHERE episode=?',(episode,)).fetchone()[0]
+        self.assertEqual(json.loads(stored)['copies'],copies)
+        self.assertFalse(delivery.discover())
     def test_new_recipient_receipt_requeues_applied_target(self):
         e=fixture.event();self.links.record_primary_publication(e['event_key'],e['episode'],1,{'kind':'issue','role':'primary','issue_number':7,'id':70,'html_url':'https://github.com/alchemmist/homelab/issues/7'})
         base={'key':'Test/spi/'+e['episode'],'episode':e['episode'],'immutable_key':True,'copies':[{'chat_id':1,'message_id':3}]}
