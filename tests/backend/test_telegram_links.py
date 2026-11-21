@@ -89,6 +89,38 @@ class OutboxTest(unittest.TestCase):
         self.outbox.request=racing; self.outbox.once()
         self.assertEqual(self.outbox.snapshot('e')['state'],'pending')
         self.assertEqual(self.outbox.snapshot('e')['revision'],2)
+    def test_two_minute_outage_lost_ack_and_restart(self):
+        # Backend A disappears. B has the same durable card state even after
+        # the process restarts; retries must target that card, revision and copies.
+        self.enqueue(); self.receipt()
+        committed, requests = set(), []
+        def service(method, path, json):
+            self.assertEqual((method, path), ('POST', '/v1/cards/links'))
+            if self.now < 1120:
+                raise ConnectionRefusedError()
+            key = (json['key'], json['revision'], json['url'],
+                   tuple((x['chat_id'], x['message_id']) for x in json['expected_copies']))
+            requests.append(key)
+            if key not in committed:
+                committed.add(key)
+                raise TimeoutError('lost acknowledgement from B')
+            return 200, dict(key=json['key'], updated=json['expected_copies'], pending=[])
+        self.outbox.request = service
+        for self.now in range(1000, 1120):
+            self.outbox.once()
+            self.assertEqual(self.outbox.snapshot('e')['state'], 'pending')
+        for self.now in range(1120, 1300):
+            self.outbox.once()
+            if committed: break
+        self.assertEqual(len(committed), 1)
+        self.assertEqual(self.outbox.snapshot('e')['state'], 'pending')
+        reopened = core.Store(Path(self.tmp.name)/'db')
+        self.outbox = links.Links(reopened, service, clock=lambda:self.now, guarded_protocol=True)
+        self.retry()
+        self.assertEqual(self.outbox.snapshot('e')['state'], 'applied')
+        self.assertEqual(requests, [requests[0]] * 2)
+        self.assertFalse(self.outbox.once())
+
     def test_legacy_bot_blocked(self):
         self.enqueue(); self.receipt(); self.outbox.guarded=False; self.outbox.once()
         self.assertEqual(self.calls,[])
