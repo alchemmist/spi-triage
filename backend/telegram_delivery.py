@@ -2,7 +2,9 @@
 import json,threading,time,urllib.request,urllib.error
 from telegram_links import Links
 
-BASE='http://socrat-bot.socrat-bot.svc:8080'
+# Bot runs on hostNetwork, pinned to socrat-2. Use the exact mesh endpoint
+# allowed by the worker NetworkPolicy; do not send the token on redirects.
+BASE='http://10.250.0.2:8082'
 class Delivery:
     def __init__(self,store,token,enabled=False):
         if enabled and not token:raise ValueError("BOT_LINK_TOKEN_REQUIRED")
