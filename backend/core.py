@@ -378,7 +378,9 @@ class Store:
                and c.execute('SELECT 1 FROM llm_admission WHERE expires>=? AND expires<=? AND expires>=? LIMIT 1',
                              (r['updated'],r['available'],r['available']-4)).fetchone()]
         hold=max(holds,default=0)
-        scheduled=[(max(r['available'],r['lease'],hold if r['stage']==0 else 0,self._owned_priority_until(c,r['stage'],now)),r) for r in rows]
+        # The active-owner gate above returned for every ready/waiting/running owner.
+        # Under the same writer lock, no candidate has an owner priority hold.
+        scheduled=[(max(r['available'],r['lease'],hold if r['stage']==0 else 0),r) for r in rows]
         ready=[r for due,r in scheduled if due<=now]
         ready.sort(key=lambda r:(-r['stage'],r['created'],r['id']))
         deadlines=[due for due,r in scheduled]

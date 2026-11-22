@@ -20,3 +20,15 @@ class QueueReadConcurrencyTests(unittest.TestCase):
                 with store.read_db() as reader, self.assertRaisesRegex(sqlite3.OperationalError, 'readonly'):
                     reader.execute('DELETE FROM dispatch')
             self.assertEqual(store.dispatch_status()['attempts'], 1)
+
+    def test_unowned_backlog_does_not_scan_owner_priority_per_job(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / 'queue.sqlite')
+            with store.db() as c:
+                for i in range(100):
+                    store._enqueue(c, {'event_key': str(i), 'episode': str(i)}, i)
+                queries = []
+                c.set_trace_callback(queries.append)
+                first, due = store._schedule(c, 101)
+                self.assertEqual((first['id'], due), ('0', 0))
+                self.assertFalse(any('AS durable_stage' in q for q in queries))
