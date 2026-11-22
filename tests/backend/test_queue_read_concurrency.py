@@ -1,20 +1,22 @@
 """Queue telemetry must not contend for SQLite's one WAL writer."""
 import sqlite3
 import sys
+import tempfile
+import unittest
 from pathlib import Path
-
-import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'backend'))
 from core import Store
 
 
-def test_health_reads_during_open_writer(tmp_path):
-    store = Store(tmp_path / 'queue.sqlite')
-    with store.db() as writer:
-        writer.execute('INSERT INTO dispatch VALUES(1,?,?,?)', ('reserved', 42, 1))
-        assert store.health()['counts'] == {}
-        assert store.dispatch_status()['attempts'] == 0
-        with store.read_db() as reader, pytest.raises(sqlite3.OperationalError, match='readonly'):
-            reader.execute('DELETE FROM dispatch')
-    assert store.dispatch_status()['attempts'] == 1
+class QueueReadConcurrencyTests(unittest.TestCase):
+    def test_health_reads_during_open_writer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory) / 'queue.sqlite')
+            with store.db() as writer:
+                writer.execute('INSERT INTO dispatch VALUES(1,?,?,?)', ('reserved', 42, 1))
+                self.assertEqual(store.health()['counts'], {})
+                self.assertEqual(store.dispatch_status()['attempts'], 0)
+                with store.read_db() as reader, self.assertRaisesRegex(sqlite3.OperationalError, 'readonly'):
+                    reader.execute('DELETE FROM dispatch')
+            self.assertEqual(store.dispatch_status()['attempts'], 1)
