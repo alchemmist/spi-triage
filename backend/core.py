@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import sqlite3
+import os
 import time
 import math
 import random
@@ -154,9 +155,11 @@ class Store:
             raise ValueError('Unsupported minute token limit')
         self.minute_token_limit = minute_token_limit
         self.path = str(path)
-        with closing(sqlite3.connect(self.path)) as c:
-            c.execute('PRAGMA temp_store=MEMORY')
-            c.execute('PRAGMA journal_mode=WAL')
+        self.pg_url = os.environ.get('SPI_POSTGRES_URL')
+        if not self.pg_url:
+            with closing(sqlite3.connect(self.path)) as c:
+                c.execute('PRAGMA temp_store=MEMORY')
+                c.execute('PRAGMA journal_mode=WAL')
         with self.db() as c:
             c.executescript('''
             CREATE TABLE IF NOT EXISTS jobs (
@@ -188,6 +191,10 @@ class Store:
 
     @contextmanager
     def db(self):
+        if self.pg_url:
+            from pg_store import connection
+            with connection(self.pg_url) as c: yield c
+            return
         c = sqlite3.connect(self.path, timeout=15)
         c.row_factory = sqlite3.Row
         try:
@@ -259,8 +266,8 @@ class Store:
             if any(r['active'] for r in rows) or len(rows)>=3 or sum(r['tokens'] for r in rows)+tokens>self.minute_token_limit:
                 # Earliest ledger change; retrying re-evaluates every constraint.
                 raise Failure('LLM_ADMISSION_DEFERRED',retry_after=max(1,min(r['expires'] for r in rows)-now))
-            return c.execute('INSERT INTO llm_admission(tokens,expires,active) VALUES(?,?,1)',
-                             (tokens,now+timeout+61)).lastrowid
+            return c.execute('INSERT INTO llm_admission(tokens,expires,active) VALUES(?,?,1) RETURNING id',
+                             (tokens,now+timeout+61)).fetchone()[0]
 
     def finish_llm(self, reservation, actual=None, now=None):
         now=time.time() if now is None else now

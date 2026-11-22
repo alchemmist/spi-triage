@@ -11,6 +11,7 @@ COPY build/legal/ /opt/spi-tokenizer/legal/
 RUN python -m pip install --no-index --no-deps /opt/spi-tokenizer/*.whl && rm /opt/spi-tokenizer/*.whl
 COPY build/library_manifest.py /tmp/library_manifest.py
 RUN python /tmp/library_manifest.py && rm /tmp/library_manifest.py
+RUN python -m pip install --no-cache-dir "psycopg[binary]==3.2.13"
 COPY backend/ /app/
 COPY frontend/ /ui/
 RUN mkdir -p /app/spi && ln -s ../github_broker.py /app/spi/github_broker.py \

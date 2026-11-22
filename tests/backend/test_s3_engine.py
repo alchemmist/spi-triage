@@ -151,11 +151,15 @@ class EngineStorageTests(unittest.TestCase):
     def test_replacement_transaction_rollback_and_stage_zero_replay(self):
         self.g.snapshot.return_value=[{'number':3,'updated_at':'new'}]
         with self.store.db() as c:
-            c.execute("CREATE TRIGGER abort_reset BEFORE UPDATE ON jobs WHEN NEW.stage=0 BEGIN SELECT RAISE(ABORT,'crash'); END")
+            if self.store.pg_url:
+                c.execute("CREATE FUNCTION refuse() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture'; END $$")
+                c.execute("CREATE TRIGGER abort_reset BEFORE UPDATE ON jobs FOR EACH ROW WHEN (NEW.stage=0) EXECUTE FUNCTION refuse()")
+            else:
+                c.execute("CREATE TRIGGER abort_reset BEFORE UPDATE ON jobs WHEN NEW.stage=0 BEGIN SELECT RAISE(ABORT,'crash'); END")
         with self.assertRaises(Failure):self.engine.run('publish',self.key)
         with self.store.db() as c:
             self.assertEqual(c.execute('SELECT count(*) FROM snapshot_budget').fetchone()[0],0)
-            c.execute('DROP TRIGGER abort_reset')
+            c.execute('DROP TRIGGER abort_reset'+(' ON jobs' if self.store.pg_url else ''))
         current=self.store.get(self.key)
         self.store.save(self.key,3,current['result'],state='processing')
         with self.assertRaisesRegex(Failure,'OPEN_SPI_CHANGED'):self.engine.run('publish',self.key)

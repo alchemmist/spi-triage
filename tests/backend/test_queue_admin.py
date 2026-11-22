@@ -104,7 +104,11 @@ class QueueAdminTests(unittest.TestCase):
 
     def test_audit_failure_rolls_back_cancellation(self):
         with self.store.db() as c:
-            c.execute("CREATE TRIGGER block_operator_audit BEFORE INSERT ON queue_operator_actions BEGIN SELECT RAISE(ABORT,'blocked'); END")
+            if self.store.pg_url:
+                c.execute("CREATE FUNCTION refuse() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture'; END $$")
+                c.execute("CREATE TRIGGER block_operator_audit BEFORE INSERT ON queue_operator_actions FOR EACH ROW EXECUTE FUNCTION refuse()")
+            else:
+                c.execute("CREATE TRIGGER block_operator_audit BEFORE INSERT ON queue_operator_actions BEGIN SELECT RAISE(ABORT,'blocked'); END")
         item = self.row()
         with self.assertRaises(Exception):
             self.api.cancel({'job_id': self.key, 'expected_updated': item['updated']})
@@ -228,7 +232,11 @@ class QueueAdminTests(unittest.TestCase):
     def test_bulk_audit_error_rolls_back_entire_batch(self):
         batch=self.seed_batch(10)
         with self.store.db() as c:
-            c.execute("CREATE TRIGGER block_batch_audit BEFORE INSERT ON queue_operator_actions WHEN NEW.job_id='"+batch[5]['job_id']+"' BEGIN SELECT RAISE(ABORT,'fixture'); END")
+            if self.store.pg_url:
+                c.execute("CREATE FUNCTION refuse() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture'; END $$")
+                c.execute("CREATE TRIGGER block_batch_audit BEFORE INSERT ON queue_operator_actions FOR EACH ROW WHEN (NEW.job_id='"+batch[5]['job_id']+"') EXECUTE FUNCTION refuse()")
+            else:
+                c.execute("CREATE TRIGGER block_batch_audit BEFORE INSERT ON queue_operator_actions WHEN NEW.job_id='"+batch[5]['job_id']+"' BEGIN SELECT RAISE(ABORT,'fixture'); END")
         with self.assertRaises(Exception):self.api.cancel_batch({'items':batch})
         with self.store.db() as c:
             self.assertEqual(c.execute("SELECT count(*) FROM jobs WHERE state='cancelled'").fetchone()[0],0)

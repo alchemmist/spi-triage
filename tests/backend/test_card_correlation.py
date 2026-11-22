@@ -26,7 +26,10 @@ class CorrelationTests(unittest.TestCase):
             self.assertEqual(result['event_key'], expected['event_key'])
         with self.store.db() as c:
             self.assertEqual(c.execute('SELECT count(*) FROM telegram_receipts').fetchone()[0], 2)
-        self.assertNotIn(b'private', Path(self.store.path).read_bytes())
+        if not self.store.pg_url: self.assertNotIn(b'private', Path(self.store.path).read_bytes())
+        else:
+            with self.store.db() as c:
+                self.assertNotIn('private', str(c.execute('SELECT * FROM telegram_receipts').fetchall()))
     def test_resolved_flap_and_unknown(self):
         firing = record_receipt(self.store, self.payload)
         self.payload['alert']['status'] = 'resolved'

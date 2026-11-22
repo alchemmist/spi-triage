@@ -186,7 +186,8 @@ class SQLiteTempStoreTests(unittest.TestCase):
         from core import Store
         with tempfile.TemporaryDirectory()as d:
             store=Store(Path(d)/'db')
-            with store.db()as c:self.assertEqual(c.execute('pragma temp_store').fetchone()[0],2)
+            if not store.pg_url:
+                with store.db()as c:self.assertEqual(c.execute('pragma temp_store').fetchone()[0],2)
             store.enqueue(event());store.claim();self.assertEqual(store.recover_on_start(),1)
             self.assertEqual(store.health()['counts'].get('retry'),1)
 
