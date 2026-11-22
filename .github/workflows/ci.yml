@@ -25,6 +25,14 @@ jobs:
           persist-credentials: false
       - name: Backend and frontend regressions (local fixtures only)
         run: python3 scripts/test_all.py
+      - name: PostgreSQL queue concurrency (disposable local database)
+        run: |
+          sudo systemctl start postgresql
+          sudo -u postgres createuser "$(id -un)"
+          sudo -u postgres createdb -O "$(id -un)" spi_queue_test
+          python3 -m venv "$RUNNER_TEMP/spi-pg-test"
+          "$RUNNER_TEMP/spi-pg-test/bin/pip" install 'psycopg[binary]==3.2.13'
+          SPI_TEST_PG_SOCKET=/var/run/postgresql "$RUNNER_TEMP/spi-pg-test/bin/python" tests/postgres/queue_read_concurrency.py
       - name: JavaScript syntax
         run: node --check frontend/app.js
       - name: Build native test image
