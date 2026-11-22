@@ -192,7 +192,8 @@ class Store:
     @contextmanager
     def read_db(self):
         if self.pg_url:
-            with self.db() as c: yield c
+            from pg_store import connection
+            with connection(self.pg_url, read_only=True) as c: yield c
             return
         # WAL readers need no reservation of SQLite's only writer.
         with closing(sqlite3.connect(self.path, timeout=15)) as c:

@@ -39,8 +39,13 @@ class Conn:
             if part.strip():self.execute(part)
 
 @contextmanager
-def connection(url):
+def connection(url, *, read_only=False):
     with psycopg.connect(url,connect_timeout=5,row_factory=factory) as db:
+        if read_only:
+            # A consistent MVCC snapshot without joining the queue of writers.
+            db.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY')
         db.execute("SET LOCAL lock_timeout='15s'")
         # Same scope as BEGIN IMMEDIATE: all owner/budget/checkpoint updates share one lock.
-        db.execute('SELECT pg_advisory_xact_lock(1397770577)');yield Conn(db)
+        if not read_only:
+            db.execute('SELECT pg_advisory_xact_lock(1397770577)')
+        yield Conn(db)
