@@ -268,7 +268,7 @@ class Store:
                 self.owners.snapshot_replaced(c,key,now)
         if exhausted:raise Failure('WRITE_NEEDS_REVIEW')
 
-    def reserve_llm(self, tokens, timeout=600, now=None):
+    def reserve_llm(self, tokens, timeout=600, now=None, peer_tokens=None):
         """One SPI-key ledger on the shared PVC. No credentials or payloads."""
         if type(tokens) is not int or not 0 < tokens <= LLM_REQUEST_TOKEN_LIMIT:
             raise Failure('LLM_REQUEST_TOO_LARGE')
@@ -276,13 +276,23 @@ class Store:
         with self.db() as c:
             binding=getattr(OWNER_CONTEXT,'binding',None)
             if binding:self._guard_owner(c,binding[0])
+            peer=False
+            if peer_tokens is not None:
+                # This reserved ledger key cannot collide with a hex job ID.
+                row=c.execute('SELECT metadata FROM llm_rate_metadata WHERE job_id=?',('route-cursor',)).fetchone()
+                peer=bool(row and row[0]=='peer' and peer_tokens<=LLM_REQUEST_TOKEN_LIMIT)
+                if peer:tokens=peer_tokens
             c.execute('DELETE FROM llm_admission WHERE expires<=?',(now,))
             rows=c.execute('SELECT * FROM llm_admission ORDER BY expires').fetchall()
             if any(r['active'] for r in rows) or len(rows)>=3 or sum(r['tokens'] for r in rows)+tokens>self.minute_token_limit:
                 # Earliest ledger change; retrying re-evaluates every constraint.
                 raise Failure('LLM_ADMISSION_DEFERRED',retry_after=max(1,min(r['expires'] for r in rows)-now))
-            return c.execute('INSERT INTO llm_admission(tokens,expires,active) VALUES(?,?,1) RETURNING id',
+            if peer_tokens is not None:
+                c.execute('INSERT OR REPLACE INTO llm_rate_metadata VALUES(?,?)',('route-cursor','primary' if peer else 'peer'))
+            reservation=c.execute('INSERT INTO llm_admission(tokens,expires,active) VALUES(?,?,1) RETURNING id',
                              (tokens,now+timeout+61)).fetchone()[0]
+
+            return reservation if peer_tokens is None else (reservation,peer)
 
     def finish_llm(self, reservation, actual=None, now=None):
         now=time.time() if now is None else now
@@ -430,11 +440,8 @@ class Store:
             self._guard_owner(c,key)
             # Total claims remain diagnostic. Busy LLM deferrals must not spend
             # the independent recovery allowance of later stages/publication.
-            if rate_metadata or code in MODEL_RETRY:
-                row=c.execute('SELECT metadata FROM llm_rate_metadata WHERE job_id=?',(key,)).fetchone()
-                alternate=json.loads(row['metadata']).get('alternate',False) if row else False
+            if rate_metadata:
                 safe=Failure(code,rate_metadata=rate_metadata).rate_metadata
-                safe['alternate']=not alternate if code in MODEL_RETRY else alternate
                 c.execute('INSERT OR REPLACE INTO llm_rate_metadata VALUES(?,?)',(key,json.dumps(safe)))
             count=job['attempts']
             safe_snapshot=code=='OPEN_SPI_CHANGED' and job['stage']==0 and not job['intent']
