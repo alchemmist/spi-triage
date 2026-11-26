@@ -321,6 +321,11 @@ class Store:
         # The previous process cannot still publish once its replacement starts.
         now=time.time()
         with self.db() as c:
+            # Recreate guarantees the previous process is gone. Only collect is
+            # pure evidence reading; never implicitly repeat inference or writes.
+            for row in c.execute("SELECT o.job_id,o.execution_id FROM workflow_wait_owner o JOIN jobs j ON j.id=o.job_id WHERE o.phase='running' AND o.stage='collect' AND j.stage=1 AND j.state='processing' AND j.intent IS NULL").fetchall():
+                c.execute('INSERT OR IGNORE INTO workflow_execution_tombstone VALUES(?)',(row['execution_id'],))
+                c.execute("UPDATE workflow_wait_owner SET phase='revoked',expires=0 WHERE job_id=?",(row['job_id'],))
             return c.execute("UPDATE jobs SET state='retry',lease=0,available=?,updated=? WHERE state='processing' AND id NOT IN (SELECT job_id FROM workflow_wait_owner WHERE phase IN ('ready','waiting','running'))",(now,now)).rowcount
     def enqueue(self, event):
         return self.enqueue_many([event])[0]

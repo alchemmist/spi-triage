@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import json
 import re
+import signal
 from datetime import datetime, timezone
 import os
 import threading
@@ -447,6 +448,14 @@ def serve():
             except (ValueError,TypeError,AttributeError):return self.send(400,{'code':'INVALID_REQUEST'})
             except Exception:return self.send(500,{'code':'INTERNAL_ERROR'})
             finally:dispatcher.signal()
-    ThreadingHTTPServer(('0.0.0.0',8080),Handler).serve_forever()
+    class DrainingServer(ThreadingHTTPServer):
+        daemon_threads=False  # server_close joins accepted stage requests.
+    with DrainingServer(('0.0.0.0',8080),Handler) as server:
+        def terminate(*_):
+            dispatcher.stopped.set()
+            dispatcher.signal()
+            threading.Thread(target=server.shutdown,daemon=True).start()
+        signal.signal(signal.SIGTERM,terminate)
+        server.serve_forever()
 
 if __name__=='__main__':serve()

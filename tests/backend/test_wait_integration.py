@@ -139,6 +139,15 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(b['stage'],'collect')
         self.assertEqual(self.model.match.call_count,2)
 
+    def test_recreate_releases_read_only_collect_and_fences_lost_execution(self):
+        ready=self.engine.run_v1('match',self.data)
+        self.store.owners.begin('collect',ready,self.now)
+        self.assertEqual(self.store.recover_on_start(),1)
+        self.assertEqual(self.store.get(self.key)['state'],'retry')
+        resumed=self.engine.claim({**self.identity,'execution_id':'4000'})
+        self.assertEqual(resumed['stage'],'collect')
+        with self.assertRaises(Failure):self.engine.run_v1('collect',ready)
+
     def test_priority_hold_is_bounded_and_rejects_invalid_higher_owner(self):
         a=self.engine.run_v1('match',self.data);a=self.engine.run_v1('collect',a)
         self.model.analyze.side_effect=Failure('LLM_ADMISSION_DEFERRED',180)
