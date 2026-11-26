@@ -136,16 +136,19 @@ class MatchSliceTests(IntegrationTests):
     def test_pairwise_nominee_reduction_is_also_checkpointed_between_calls(self):
         self.exercise(nominees=True)
 
-    def test_real_timeout_remains_fatal_once_and_logs_only_valid_execution_context(self):
+    def test_model_timeout_requeues_once_without_paging(self):
         import contextlib,io
         self.model.match.side_effect=Failure('LLM_UPSTREAM_TIMEOUT')
         output=io.StringIO()
-        with contextlib.redirect_stdout(output),self.assertRaisesRegex(Failure,'LLM_UPSTREAM_TIMEOUT'):
-            self.engine.run_v1('match',self.data)
+        with contextlib.redirect_stdout(output):
+            result=self.engine.run_v1('match',self.data)
+        self.assertEqual(result,{'contract':1,'status':'empty','job_id':''})
+        self.assertEqual(self.store.get(self.key)['state'],'retry')
         records=[json.loads(x) for x in output.getvalue().splitlines()]
-        failed=next(x for x in records if x['event']=='stage_failed')
-        self.assertEqual(failed['n8n_execution_id'],'1234')
-        self.assertNotIn('job_id',failed)
+        self.assertNotIn('stage_failed',[x['event'] for x in records])
+        deferred=next(x for x in records if x['event']=='stage_deferred')
+        self.assertEqual(deferred['code'],'LLM_UPSTREAM_TIMEOUT')
+        self.assertNotIn('job_id',deferred)
         self.model.match.assert_called_once()
         with self.store.db() as c:
             self.assertEqual(c.execute('SELECT phase FROM workflow_wait_owner WHERE job_id=?',(self.key,)).fetchone()[0],'failed')
