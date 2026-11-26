@@ -299,11 +299,6 @@ class Model:
         durable = schema is REPORT_SCHEMA and binding and isinstance(self.store,Store)
         input_digest=digest(body)
         fallback=os.getenv('SPI_LLM_RETRY_MODEL','')
-        alternate=False
-        if fallback and binding:
-            with self.store.read_db() as c:
-                row=c.execute('SELECT metadata FROM llm_rate_metadata WHERE job_id=?',(binding[0],)).fetchone()
-            alternate=bool(row and json.loads(row['metadata']).get('alternate'))
         failures=0
         if durable:
             with self.store.db() as c:
@@ -316,20 +311,24 @@ class Model:
                 body=self.payload(task+' Previous output failed evidence citation validation. Every fact must cite only allowed artifact IDs; use facts=[] when unsupported. Do not invent references.',data,schema)
                 tokens=self.budget_reservation(body)
                 if tokens>30000:raise Failure('LLM_REQUEST_TOO_LARGE')
-            if alternate:
-                body['model']=fallback
-                body.pop('chat_template_kwargs',None)
-                guidance=body.pop('response_format')['json_schema']['schema']
-                body['messages'][0]['content']+=' Return only JSON matching this schema: '+json.dumps(guidance)
-                tokens=len(json.dumps(body,ensure_ascii=False).encode())+body['max_tokens']+128
-                if tokens>30000:raise Failure('LLM_REQUEST_TOO_LARGE')
+            guidance=body['response_format']['json_schema']['schema']
+            if fallback:
+                peer_body=dict(body,model=fallback,messages=[dict(m) for m in body['messages']])
+                peer_body.pop('chat_template_kwargs',None)
+                peer_body.pop('response_format')
+                peer_body['messages'][0]['content']+=' Return only JSON matching this schema: '+json.dumps(guidance)
+                peer_tokens=len(json.dumps(peer_body,ensure_ascii=False).encode())+peer_body['max_tokens']+128
             remaining=deadline-time.monotonic()
             if remaining<10: raise Failure('LLM_MODEL_STAGE_BUDGET_EXCEEDED')
             timeout=min(remaining,getattr(REQUEST_DEADLINE,'at',deadline)-time.monotonic())
             if timeout<10:raise Failure('LLM_MODEL_STAGE_BUDGET_EXCEEDED')
             if self.store is None:
                 self.store=Store(os.environ.get('SPI_DATABASE','/data/spi.sqlite'))
-            reservation=self.store.reserve_llm(tokens,timeout=timeout)
+            if fallback:
+                reservation,use_peer=self.store.reserve_llm(tokens,timeout=timeout,peer_tokens=peer_tokens)
+            else:
+                reservation=self.store.reserve_llm(tokens,timeout=timeout)
+                use_peer=False
             if durable and failures:
                 # Consume repair before transport. A crash/ambiguous response
                 # must not authorize another paid regeneration after restart.
@@ -339,7 +338,7 @@ class Model:
             response={}
             try:
                 response=self.http.request('POST',self.base+'/chat/completions',{'Authorization':'Bearer '+self.key},
-                                           body,timeout=timeout,limit=250_000)
+                                           peer_body if use_peer else body,timeout=timeout,limit=250_000)
             except Failure as e:
                 raise Failure('LLM_'+e.code,retry_after=e.retry_after,rate_metadata=e.rate_metadata) from None
             finally:
@@ -363,7 +362,7 @@ class Model:
                         raise Failure('INVALID_EVIDENCE_REFERENCE')
                 if schema is REPORT_SCHEMA:
                     from report_bounds import validate_generated_report
-                    validate_generated_report(value,body['response_format']['json_schema']['schema'],reference_ids=ids)
+                    validate_generated_report(value,guidance,reference_ids=ids)
                 return value
             except (KeyError,IndexError,TypeError,ValueError,Failure) as exc:
                 last=exc.code if isinstance(exc,Failure) else 'INVALID_MODEL_SCHEMA'

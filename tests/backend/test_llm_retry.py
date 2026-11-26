@@ -21,18 +21,19 @@ class DurableRetryTests(unittest.TestCase):
         self.store.claim();self.store.save(key,4,{'done':True},state='complete')
         self.assertEqual(self.store.get(key)['state'],'complete');self.assertEqual(self.store.get(key)['attempts'],21)
     def test_model_route_survives_worker_restarts(self):
-        from core import OWNER_CONTEXT
-        key=self.store.enqueue(f.event())['job_id']
-        for expected in ['qwen3.8-27b','v-deepseek-uc','qwen3.8-27b']:
-            self.store.claim()
-            http=Mock();http.request.side_effect=Failure('HTTP_429')
-            with patch.dict('os.environ',SPI_LLM_RETRY_MODEL='v-deepseek-uc'), patch.object(OWNER_CONTEXT,'binding',(key,'test'),create=True), patch.object(self.store,'reserve_llm'), patch.object(self.store,'finish_llm'):
-                with self.assertRaisesRegex(Failure,'LLM_HTTP_429'):
-                    Model(http,'fake',store=self.store).call('match',{},MATCH_SCHEMA,time.monotonic()+60)
+        good={'issue_number':0,'reason':'Different','confidence':'low'}
+        for i,expected in enumerate(['qwen3.8-27b','v-deepseek-uc']*3):
+            http=Mock()
+            http.request.return_value={'choices':[{'message':{'content':json.dumps(good)}}]}
+            if i==2:http.request.side_effect=Failure('HTTP_429')
+            with patch.dict('os.environ',SPI_LLM_RETRY_MODEL='v-deepseek-uc'):
+                model=Model(http,'fake',store=self.store)
+                if i==2:
+                    with self.assertRaisesRegex(Failure,'LLM_HTTP_429'):model.call('match',{},MATCH_SCHEMA,time.monotonic()+60)
+                else:self.assertEqual(model.call('match',{},MATCH_SCHEMA,time.monotonic()+60),good)
             self.assertEqual(http.request.call_args.args[3]['model'],expected)
-            self.store.fail(key,'LLM_HTTP_429')
             self.store=Store(self.store.path)
-            with self.store.db() as c:c.execute('update jobs set available=0 where id=?',(key,))
+            with self.store.db() as c:c.execute('update llm_admission set expires=0')
 
     def test_permanent_and_ambiguous_errors_still_stop(self):
         for index,code in enumerate(['HTTP_429','LLM_HTTP_400','LLM_HTTP_401','LLM_HTTP_403','WRITE_NEEDS_REVIEW']):
