@@ -298,6 +298,12 @@ class Model:
             self.store=Store(os.environ.get('SPI_DATABASE','/data/spi.sqlite'))
         durable = schema is REPORT_SCHEMA and binding and isinstance(self.store,Store)
         input_digest=digest(body)
+        fallback=os.getenv('SPI_LLM_RETRY_MODEL','')
+        alternate=False
+        if fallback and binding:
+            with self.store.read_db() as c:
+                row=c.execute('SELECT metadata FROM llm_rate_metadata WHERE job_id=?',(binding[0],)).fetchone()
+            alternate=bool(row and json.loads(row['metadata']).get('alternate'))
         failures=0
         if durable:
             with self.store.db() as c:
@@ -309,6 +315,13 @@ class Model:
             if failures:
                 body=self.payload(task+' Previous output failed evidence citation validation. Every fact must cite only allowed artifact IDs; use facts=[] when unsupported. Do not invent references.',data,schema)
                 tokens=self.budget_reservation(body)
+                if tokens>30000:raise Failure('LLM_REQUEST_TOO_LARGE')
+            if alternate:
+                body['model']=fallback
+                body.pop('chat_template_kwargs',None)
+                guidance=body.pop('response_format')['json_schema']['schema']
+                body['messages'][0]['content']+=' Return only JSON matching this schema: '+json.dumps(guidance)
+                tokens=len(json.dumps(body,ensure_ascii=False).encode())+body['max_tokens']+128
                 if tokens>30000:raise Failure('LLM_REQUEST_TOO_LARGE')
             remaining=deadline-time.monotonic()
             if remaining<10: raise Failure('LLM_MODEL_STAGE_BUDGET_EXCEEDED')

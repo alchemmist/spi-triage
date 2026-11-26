@@ -10,7 +10,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from storage_runtime import load_storage
 from dispatcher import Dispatcher
-from core import Failure, OWNER_CONTEXT, PATIENT_TRANSIENT, Store, digest, normalize, render
+from core import Failure, OWNER_CONTEXT, MODEL_RETRY, PATIENT_TRANSIENT, Store, digest, normalize, render
 from integrations import Evidence, GitHub, HTTP, Model, REQUEST_DEADLINE
 from evidence_bundle import index_markdown, publish_parts, storage_objects, storage_markdown
 from s3_evidence import StorageTransient, StoragePermanent, StorageConflict
@@ -108,6 +108,10 @@ class Engine:
                     except Failure as terminal:
                         exc=terminal
                 self.store.fail(owner['job_id'],exc.code,retry_after=exc.retry_after,rate_metadata=exc.rate_metadata,on_fail=self.store.owners.failure_callback(owner))
+                if name in ('match','analyze') and exc.code in MODEL_RETRY:
+                    # The retry is committed and this execution owns no more work.
+                    log_event('stage_deferred','warning',stage=name,code=exc.code)
+                    return {'contract':1,'status':'empty','job_id':''}
                 log_event('stage_failed','error',stage=name,code=exc.code,n8n_execution_id=owner['execution_id'])
                 raise exc
             except Exception:
