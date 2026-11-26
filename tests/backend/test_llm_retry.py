@@ -20,6 +20,20 @@ class DurableRetryTests(unittest.TestCase):
             with self.store.db()as c:c.execute('update jobs set available=0 where id=?',(key,))
         self.store.claim();self.store.save(key,4,{'done':True},state='complete')
         self.assertEqual(self.store.get(key)['state'],'complete');self.assertEqual(self.store.get(key)['attempts'],21)
+    def test_model_route_survives_worker_restarts(self):
+        from core import OWNER_CONTEXT
+        key=self.store.enqueue(f.event())['job_id']
+        for expected in ['qwen3.8-27b','v-deepseek-uc','qwen3.8-27b']:
+            self.store.claim()
+            http=Mock();http.request.side_effect=Failure('HTTP_429')
+            with patch.dict('os.environ',SPI_LLM_RETRY_MODEL='v-deepseek-uc'), patch.object(OWNER_CONTEXT,'binding',(key,'test'),create=True), patch.object(self.store,'reserve_llm'), patch.object(self.store,'finish_llm'):
+                with self.assertRaisesRegex(Failure,'LLM_HTTP_429'):
+                    Model(http,'fake',store=self.store).call('match',{},MATCH_SCHEMA,time.monotonic()+60)
+            self.assertEqual(http.request.call_args.args[3]['model'],expected)
+            self.store.fail(key,'LLM_HTTP_429')
+            self.store=Store(self.store.path)
+            with self.store.db() as c:c.execute('update jobs set available=0 where id=?',(key,))
+
     def test_permanent_and_ambiguous_errors_still_stop(self):
         for index,code in enumerate(['HTTP_429','LLM_HTTP_400','LLM_HTTP_401','LLM_HTTP_403','WRITE_NEEDS_REVIEW']):
             key=self.store.enqueue(f.event(start='2026-11-03T13:00:%02dZ'%index))['job_id']

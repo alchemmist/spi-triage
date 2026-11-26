@@ -29,6 +29,8 @@ LLM_TRANSIENT = {'LLM_'+code for code in (
     'UPSTREAM_TIMEOUT','UPSTREAM_NETWORK_ERROR','REQUEST_BUDGET_EXCEEDED',
     'MODEL_STAGE_BUDGET_EXCEEDED','ADMISSION_DEFERRED')}
 
+MODEL_RETRY = LLM_TRANSIENT - {'LLM_ADMISSION_DEFERRED'}
+
 PATIENT_TRANSIENT = LLM_TRANSIENT | {'STORAGE_TRANSIENT', 'GITHUB_SNAPSHOT_UNSTABLE', 'GITHUB_READ_TIMEOUT','GITHUB_READ_NETWORK_ERROR','MATCH_PROGRESS_DEFERRED', 'GRAPH_CAPTURE_DEFERRED'}
 
 SECRET_KEY = re.compile(r'authorization|cookie|password|passwd|secret|api[_-]?key|access[_-]?token|refresh[_-]?token|x[_-]?token|private[_-]?key', re.I)
@@ -428,8 +430,11 @@ class Store:
             self._guard_owner(c,key)
             # Total claims remain diagnostic. Busy LLM deferrals must not spend
             # the independent recovery allowance of later stages/publication.
-            if rate_metadata:
+            if rate_metadata or code in MODEL_RETRY:
+                row=c.execute('SELECT metadata FROM llm_rate_metadata WHERE job_id=?',(key,)).fetchone()
+                alternate=json.loads(row['metadata']).get('alternate',False) if row else False
                 safe=Failure(code,rate_metadata=rate_metadata).rate_metadata
+                safe['alternate']=not alternate if code in MODEL_RETRY else alternate
                 c.execute('INSERT OR REPLACE INTO llm_rate_metadata VALUES(?,?)',(key,json.dumps(safe)))
             count=job['attempts']
             safe_snapshot=code=='OPEN_SPI_CHANGED' and job['stage']==0 and not job['intent']
