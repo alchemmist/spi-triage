@@ -102,6 +102,13 @@ class ReportBoundsTests(unittest.TestCase):
 
 @patch.dict('os.environ',{'SPI_TOKEN_ACCOUNTING_MODE':'byte-bound-v1'})
 class ReportCompletenessTests(unittest.TestCase):
+    def test_exact_decoder_cap_gets_one_repair(self):
+        m=Model(Mock(),'test-only',store=Mock());bad=f.report();bad['hypotheses']=['x'*96]
+        def response(value):return {'choices':[{'finish_reason':'stop','message':{'content':json.dumps(value)}}]}
+        m.http.request.side_effect=[response(bad),response(f.report())]
+        self.assertEqual(m.call('analysis',{},REPORT_SCHEMA,time.monotonic()+30),f.report())
+        self.assertEqual(m.http.request.call_count,2)
+
     def test_cap_fragment_is_rejected_without_an_extra_paid_regeneration(self):
         m=Model(Mock(),'test-only',store=Mock());value=f.report()
         value['summary']='No application-level errors, pan'

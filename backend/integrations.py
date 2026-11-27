@@ -289,6 +289,7 @@ class Model:
         return visit(value)
 
     def call(self,task,data,schema,deadline):
+        from report_bounds import FieldCapFragment
         last='INVALID_MODEL_SCHEMA'
         body=self.payload(task,data,schema)
         tokens=self.counter.reservation(body) if self.counter else self.reservation(body)
@@ -308,7 +309,7 @@ class Model:
         for attempt in range(2):
             if failures>=2:raise Failure('LLM_INVALID_EVIDENCE_REFERENCE')
             if failures:
-                body=self.payload(task+' Previous output failed evidence citation validation. Every fact must cite only allowed artifact IDs; use facts=[] when unsupported. Do not invent references.',data,schema)
+                body=self.payload(task+' Previous output failed validation. Write shorter complete sentences, well below each field limit. Every fact must cite only allowed artifact IDs; use facts=[] when unsupported. Do not invent references.',data,schema)
                 tokens=self.budget_reservation(body)
                 if tokens>30000:raise Failure('LLM_REQUEST_TOO_LARGE')
             guidance=body['response_format']['json_schema']['schema']
@@ -366,9 +367,9 @@ class Model:
                 return value
             except (KeyError,IndexError,TypeError,ValueError,Failure) as exc:
                 last=exc.code if isinstance(exc,Failure) else 'INVALID_MODEL_SCHEMA'
-                # Only citation failures get one bounded regeneration. Persist
+                # Citation errors and decoder-cap fragments share one repair. Persist
                 # before admission can defer or the process can restart.
-                if schema is REPORT_SCHEMA and last=='INVALID_EVIDENCE_REFERENCE':
+                if schema is REPORT_SCHEMA and (last=='INVALID_EVIDENCE_REFERENCE' or isinstance(exc,FieldCapFragment)):
                     failures+=1
                     if durable:
                         with self.store.db() as c:

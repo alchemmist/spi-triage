@@ -41,6 +41,10 @@ def guided_report_schema(ids=None,issue_numbers=(0,)):
     return result
 
 
+class FieldCapFragment(Failure):
+    """Incomplete generated sentence at the decoder field ceiling."""
+
+
 def validate_generated_report(value,schema,reference_ids=None):
     """Reject field-cap fragments, never silently publish them as full findings."""
     validate(value,schema)
@@ -59,5 +63,7 @@ def validate_generated_report(value,schema,reference_ids=None):
             if not prose.endswith(('.', '?', '!')) or prose.endswith('...'):
                 logging.getLogger(__name__).warning('generated_report_rejected %s',json.dumps({
                     'field':key,'reason':'INCOMPLETE_SENTENCE','chars':len(text)},sort_keys=True))
+                limit=TEXT_LIMITS[key] if key in TEXT_LIMITS else ARRAY_LIMITS[key][1]
+                if len(text)==limit:raise FieldCapFragment('INVALID_MODEL_SCHEMA')
                 raise Failure('INVALID_MODEL_SCHEMA')
     return value
